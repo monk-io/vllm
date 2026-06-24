@@ -1,0 +1,51 @@
+namespace: vllm
+
+example:
+  defines: runnable
+  inherits: vllm/base
+  metadata:
+    name: vLLM Component Example
+    description: |
+      Local component example inheriting vllm/base and publishing a
+      non-privileged localhost port for verification. It uses smoke mode so the
+      component can be tested without GPU hardware or model downloads. Compose
+      applications should switch runtime-mode to serve on GPU-capable hosts.
+    tags: vllm, llm, component, example, local
+  variables:
+    runtime-mode:
+      type: string
+      value: smoke
+      env: VLLM_RUNTIME_MODE
+      description: Keeps the component example locally verifiable; set serve for real model inference.
+    model:
+      type: string
+      value: facebook/opt-125m
+      env: VLLM_MODEL
+      description: Public small model id reported by smoke mode and used if serve mode is enabled.
+    served-model-name:
+      type: string
+      value: opt-125m
+      env: VLLM_SERVED_MODEL_NAME
+      description: OpenAI-compatible model alias reported by the component example.
+    cache-volume-name:
+      type: string
+      value: vllm-example-cache
+      description: Monk volume subdirectory used by the component example.
+    host-port:
+      type: int
+      value: 8011
+      description: Non-privileged host port published for local component verification.
+  services:
+    http:
+      container: server
+      port: <- $port
+      protocol: tcp
+      publish: true
+      host-port: <- $host-port
+      description: Published local vLLM-compatible HTTP service for component verification.
+  checks:
+    readiness:
+      code: http-get-service("vllm/example", "http", "/health") get-member("status") 200
+      initialDelay: 10
+      period: 10
+      attempts: 36

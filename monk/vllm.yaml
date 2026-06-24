@@ -1,0 +1,168 @@
+namespace: vllm
+
+base:
+  defines: runnable
+  metadata:
+    name: vLLM Base
+    description: |
+      Reusable vLLM OpenAI-compatible model server component. The base keeps
+      its HTTP service private for composition and does not include a backing
+      service. For real inference, inherit this template, set runtime-mode to
+      serve, choose an appropriate model, and schedule it on GPU-capable Monk
+      capacity. Gated Hugging Face models require inheriting templates to permit
+      and set a plain-name secret such as secret("hf-token").
+    tags: vllm, llm, inference, openai-compatible, component
+    website: https://vllm.ai/
+    source: https://github.com/vllm-project/vllm
+    publisher: monk.io
+    private: false
+  variables:
+    image:
+      type: string
+      value: vllm/vllm-openai-cpu
+      description: Public vLLM Docker image. CPU image supports local smoke verification; production GPU deployments should usually override to vllm/vllm-openai.
+    image-tag:
+      type: string
+      value: latest-arm64
+      description: Public vLLM Docker image tag. Local default targets arm64 CPU verification; use a GPU/CUDA tag or matching CPU tag for other hosts.
+    runtime-mode:
+      type: string
+      value: smoke
+      env: VLLM_RUNTIME_MODE
+      description: Runtime mode. smoke starts a lightweight OpenAI-compatible health surface; serve starts vLLM and requires suitable hardware and model access.
+    model:
+      type: string
+      value: facebook/opt-125m
+      env: VLLM_MODEL
+      description: Hugging Face model id passed to vLLM serve mode and reported by smoke mode.
+    served-model-name:
+      type: string
+      value: vllm-model
+      env: VLLM_SERVED_MODEL_NAME
+      description: Public model alias reported through OpenAI-compatible model listing and passed to vLLM serve mode.
+    host:
+      type: string
+      value: 0.0.0.0
+      env: VLLM_HOST
+      description: Address the HTTP server binds inside the container.
+    port:
+      type: int
+      value: 8000
+      env: VLLM_PORT
+      description: Internal HTTP port used by the OpenAI-compatible server.
+    api-key:
+      type: string
+      value: ""
+      env: VLLM_API_KEY
+      description: Sensitive optional API bearer token. Public production inheritors should set this from secret("vllm-api-key") and add additional edge protection for non-/v1 endpoints.
+    hf-token:
+      type: string
+      value: ""
+      env: HF_TOKEN
+      description: Sensitive optional Hugging Face token. Inheriting gated-model deployments should set this from secret("hf-token") using a plain secret name.
+    serve-args:
+      type: string
+      value: ""
+      env: VLLM_SERVE_ARGS
+      description: Extra arguments appended to vLLM serve mode, for tensor parallelism, dtype, quantization, download directory, and other deployment tuning.
+    cache-volume-name:
+      type: string
+      value: vllm-base-cache
+      description: Monk volume subdirectory used for Hugging Face and vLLM cache data.
+    python-unbuffered:
+      type: string
+      value: "1"
+      env: PYTHONUNBUFFERED
+      description: Forces unbuffered Python output so Monk logs show startup progress promptly.
+  containers:
+    server:
+      image: <- $image
+      image-tag: <- $image-tag
+      restart: unless-stopped
+      paths:
+        - <- `${volume-path}/${cache-volume-name}:/root/.cache`
+      entrypoint: /bin/sh /opt/vllm-entrypoint.sh
+  files:
+    entrypoint-script:
+      container: server
+      path: /opt/vllm-entrypoint.sh
+      raw: true
+      contents: |
+        set -eu
+        if [ "${VLLM_RUNTIME_MODE:-smoke}" = "serve" ]; then
+          api_key_args=""
+          if [ -n "${VLLM_API_KEY:-}" ]; then
+            api_key_args="--api-key ${VLLM_API_KEY}"
+          fi
+          exec vllm serve "${VLLM_MODEL}" \
+            --host "${VLLM_HOST}" \
+            --port "${VLLM_PORT}" \
+            --served-model-name "${VLLM_SERVED_MODEL_NAME}" \
+            ${api_key_args} ${VLLM_SERVE_ARGS}
+        fi
+        exec python /opt/vllm-smoke.py
+    smoke-server:
+      container: server
+      path: /opt/vllm-smoke.py
+      raw: true
+      contents: |
+        import json
+        import os
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        host = os.environ.get("VLLM_HOST", "0.0.0.0")
+        port = int(os.environ.get("VLLM_PORT", "8000"))
+        model = os.environ.get("VLLM_MODEL", "facebook/opt-125m")
+        served_model_name = os.environ.get("VLLM_SERVED_MODEL_NAME", "vllm-model")
+        started_at = int(time.time())
+
+        class Handler(BaseHTTPRequestHandler):
+            def _json(self, status, payload):
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path in ("/", "/health", "/healthz", "/readyz"):
+                    self._json(200, {
+                        "status": "ok",
+                        "runtime": "vllm-smoke",
+                        "model": model,
+                        "served_model_name": served_model_name,
+                        "started_at": started_at,
+                    })
+                    return
+                if self.path == "/v1/models":
+                    self._json(200, {
+                        "object": "list",
+                        "data": [{
+                            "id": served_model_name,
+                            "object": "model",
+                            "created": started_at,
+                            "owned_by": "vllm",
+                        }],
+                    })
+                    return
+                self._json(404, {"error": "not found"})
+
+            def log_message(self, fmt, *args):
+                print("%s - %s" % (self.address_string(), fmt % args), flush=True)
+
+        ThreadingHTTPServer((host, port), Handler).serve_forever()
+  services:
+    http:
+      container: server
+      port: <- $port
+      protocol: tcp
+      publish: false
+      description: Private vLLM OpenAI-compatible HTTP service for Monk composition.
+  checks:
+    readiness:
+      code: http-get-service("vllm/base", "http", "/health") get-member("status") 200
+      initialDelay: 10
+      period: 10
+      attempts: 36
