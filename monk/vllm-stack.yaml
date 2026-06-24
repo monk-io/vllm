@@ -1,0 +1,99 @@
+namespace: vllm
+
+stack:
+  defines: runnable
+  inherits: vllm/base
+  metadata:
+    name: vLLM Standalone Server
+    description: |
+      Production-intended standalone vLLM server. The service remains private by
+      default because vLLM exposes unauthenticated operational endpoints even
+      when VLLM_API_KEY is configured for OpenAI-compatible API paths. Expose it
+      only through an authenticated edge service or a private network route in
+      inheriting templates.
+    tags: vllm, llm, inference, standalone, production
+  variables:
+    image:
+      type: string
+      value: vllm/vllm-openai-cpu
+      description: Public vLLM Docker image. Override to vllm/vllm-openai with a GPU/CUDA tag on GPU production capacity.
+    image-tag:
+      type: string
+      value: latest-arm64
+      description: Public vLLM CPU image tag used for local deployability; production GPU stacks should set a GPU-compatible image tag.
+    runtime-mode:
+      type: string
+      value: smoke
+      env: VLLM_RUNTIME_MODE
+      description: Default smoke mode supports template readiness checks; set serve in GPU-backed production deployments.
+    model:
+      type: string
+      value: Qwen/Qwen3-0.6B
+      env: VLLM_MODEL
+      description: Public model id intended for small production trials when runtime-mode is set to serve.
+    served-model-name:
+      type: string
+      value: qwen3-0.6b
+      env: VLLM_SERVED_MODEL_NAME
+      description: OpenAI-compatible model alias for the standalone server.
+    api-key:
+      type: string
+      value: ""
+      env: VLLM_API_KEY
+      description: Sensitive optional API bearer token. Inheriting exposed deployments should set secret("vllm-api-key") and protect all non-/v1 endpoints at the edge.
+    cache-volume-name:
+      type: string
+      value: vllm-stack-cache
+      description: Monk volume subdirectory used by the standalone server.
+  services:
+    http:
+      container: server
+      port: <- $port
+      protocol: tcp
+      publish: false
+      description: Private standalone vLLM HTTP service for authenticated upstream routing or internal use.
+  checks:
+    readiness:
+      code: http-get-service("vllm/stack", "http", "/health") get-member("status") 200
+      initialDelay: 10
+      period: 10
+      attempts: 36
+
+stack-local:
+  defines: runnable
+  inherits: vllm/stack
+  metadata:
+    name: vLLM Standalone Local Server
+    description: |
+      Local verification flavor for the standalone vLLM stack. It publishes a
+      non-privileged localhost port and runs smoke mode because local Monk
+      ingress is unavailable and GPU hardware may not be present.
+    tags: vllm, llm, inference, standalone, local
+  variables:
+    runtime-mode:
+      type: string
+      value: smoke
+      env: VLLM_RUNTIME_MODE
+      description: Keeps local standalone verification independent of GPU hardware and model downloads.
+    cache-volume-name:
+      type: string
+      value: vllm-stack-local-cache
+      description: Monk volume subdirectory used by the local standalone flavor.
+    host-port:
+      type: int
+      value: 8013
+      description: Non-privileged host port published for local standalone verification.
+  services:
+    http:
+      container: server
+      port: <- $port
+      protocol: tcp
+      publish: true
+      host-port: <- $host-port
+      description: Published local vLLM-compatible HTTP service for standalone verification.
+  checks:
+    readiness:
+      code: http-get-service("vllm/stack-local", "http", "/health") get-member("status") 200
+      initialDelay: 10
+      period: 10
+      attempts: 36
