@@ -1,0 +1,5 @@
+LOAD monk/vllm.yaml
+LOAD monk/vllm-example.yaml
+LOAD monk/vllm-stack.yaml
+
+ENTRY vllm/stack-local
