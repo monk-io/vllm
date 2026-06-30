@@ -65,10 +65,6 @@ base:
       value: ""
       env: VLLM_SERVE_ARGS
       description: Extra arguments appended to vLLM serve mode, for tensor parallelism, dtype, quantization, download directory, and other deployment tuning.
-    cache-volume-name:
-      type: string
-      value: vllm-base-cache
-      description: Monk volume subdirectory used for Hugging Face and vLLM cache data.
     python-unbuffered:
       type: string
       value: "1"
@@ -79,9 +75,13 @@ base:
       image: <- $image
       image-tag: <- $image-tag
       restart: unless-stopped
-      paths:
-        - <- `${volume-path}/${cache-volume-name}:/root/.cache`
+      mounted-volumes:
+        cache:
+          path: /root/.cache
       entrypoint: /bin/sh /opt/vllm-entrypoint.sh
+  volumes:
+    cache:
+      kind: local
   files:
     entrypoint-script:
       container: server

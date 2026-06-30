@@ -41,10 +41,6 @@ stack:
       value: ""
       env: VLLM_API_KEY
       description: Sensitive optional API bearer token. Inheriting exposed deployments should set secret("vllm-api-key") and protect all non-/v1 endpoints at the edge.
-    cache-volume-name:
-      type: string
-      value: vllm-stack-cache
-      description: Monk volume subdirectory used by the standalone server.
   services:
     http:
       container: server
@@ -75,10 +71,6 @@ stack-local:
       value: smoke
       env: VLLM_RUNTIME_MODE
       description: Keeps local standalone verification independent of GPU hardware and model downloads.
-    cache-volume-name:
-      type: string
-      value: vllm-stack-local-cache
-      description: Monk volume subdirectory used by the local standalone flavor.
     host-port:
       type: int
       value: 8013
