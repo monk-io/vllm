@@ -36,7 +36,6 @@ example:
       container: server
       port: <- $port
       protocol: tcp
-      publish: true
       host-port: <- $host-port
       description: Published local vLLM-compatible HTTP service for component verification.
   checks:
