@@ -27,10 +27,6 @@ example:
       value: opt-125m
       env: VLLM_SERVED_MODEL_NAME
       description: OpenAI-compatible model alias reported by the component example.
-    cache-volume-name:
-      type: string
-      value: vllm-example-cache
-      description: Monk volume subdirectory used by the component example.
     host-port:
       type: int
       value: 8011
